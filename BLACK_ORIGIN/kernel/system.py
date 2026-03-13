@@ -1,8 +1,12 @@
 from __future__ import annotations
+
 import os
 from typing import Dict, List
+
 from BLACK_ORIGIN.common import Signal
+from BLACK_ORIGIN.kernel.communication import EventBus
 from BLACK_ORIGIN.kernel.intelligence_loop import IntelligenceLoop, LOOP_STAGES
+from BLACK_ORIGIN.kernel.runtime import GoalEngine, RuntimeEngine, TaskEngine
 from BLACK_ORIGIN.planetary_data_index.module import PlanetaryDataIndexModule
 from BLACK_ORIGIN.collector_generator.module import CollectorGeneratorModule
 from BLACK_ORIGIN.data_spine.module import DataSpineModule
@@ -32,24 +36,45 @@ class BlackOriginSystem:
     def __init__(self):
         self.api_key = os.getenv("OPENAI_API_KEY", "")
         self.loop = IntelligenceLoop()
+        self.event_bus = EventBus()
+        self.task_engine = TaskEngine()
+        self.goal_engine = GoalEngine()
+        self.runtime_engine = RuntimeEngine(self.event_bus, self.task_engine, self.goal_engine)
         self.modules = [
             PlanetaryDataIndexModule(), CollectorGeneratorModule(), DataSpineModule(), MemoryModule(),
             KnowledgeFabricModule(), KnowledgeGraphModule(), WorldModelModule(), PlanetaryDigitalTwinModule(),
             SimulationModule(), DiscoveryEngineModule(), ReasoningModule(), StrategyModule(),
             ResearchCivilizationModule(), AgentsModule(), OrchestratorModule(), MetaIntelligenceModule(),
             EvolutionModule(), RecursiveIntelligenceModule(), BlackEngineModule(), ComputerControlModule(),
-            DistributedNetworkModule(), SyntheticUniverseModule(), CivilizationModule()
+            DistributedNetworkModule(), SyntheticUniverseModule(), CivilizationModule(),
         ]
 
     def run_cycle(self, state: Dict[str, str]) -> Dict[str, str]:
+        runtime_snapshot = self.runtime_engine.tick({"state": state})
         signals: List[Signal] = self.loop.observe(state)
+        for signal in signals:
+            signal.payload.update(
+                {
+                    "event_bus": self.event_bus,
+                    "task_engine": self.task_engine,
+                    "goal_engine": self.goal_engine,
+                    "runtime": runtime_snapshot,
+                    "goal": "advance-civilization-intelligence",
+                }
+            )
         for stage in LOOP_STAGES[1:]:
             signals = [Signal(source=s.source, stage=stage, payload=s.payload, score=s.score) for s in signals]
+            self.event_bus.publish("loop.stage", {"stage": stage, "signal_count": len(signals)}, source="system")
             for module in self.modules:
                 signals = module.process(signals)
         final = signals[-1].payload if signals else {"status": "empty"}
         final["api_key_loaded"] = bool(self.api_key)
-        return {"status": "ok", "knowledge_keys": str(len(final.keys())), "api_key_loaded": str(final['api_key_loaded'])}
+        return {
+            "status": "ok",
+            "knowledge_keys": str(len(final.keys())),
+            "api_key_loaded": str(final["api_key_loaded"]),
+            "events": str(len(self.event_bus.history())),
+        }
 
     def run(self, cycles: int = 2) -> None:
         state = {"planet": "earth", "mode": "continuous"}
