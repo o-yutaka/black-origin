@@ -18,8 +18,9 @@ def _mean_metrics(evaluations: Iterable[Evaluation]) -> Dict[str, float]:
 class PromotionGate:
     """Require evaluator evidence and reject unacceptable regressions.
 
-    Higher values are assumed better for all required metrics. Metric-specific
-    tolerances can be used when a small regression is acceptable.
+    Metrics default to ``maximize``. Individual metrics can be declared
+    ``minimize`` (for latency, cost, error rate, etc.), in which case lower raw
+    values produce positive normalized improvement.
     """
 
     def __init__(
@@ -28,6 +29,7 @@ class PromotionGate:
         min_improvement: float = 0.0,
         max_regression: float = 0.0,
         metric_regression_limits: Mapping[str, float] | None = None,
+        metric_directions: Mapping[str, str] | None = None,
     ) -> None:
         if not required_metrics:
             raise ValueError("at least one required metric is needed")
@@ -40,6 +42,23 @@ class PromotionGate:
             str(key): max(0.0, float(value))
             for key, value in (metric_regression_limits or {}).items()
         }
+        self.metric_directions = {
+            str(key): str(value).lower()
+            for key, value in (metric_directions or {}).items()
+        }
+        invalid = {
+            key: direction
+            for key, direction in self.metric_directions.items()
+            if direction not in {"maximize", "minimize"}
+        }
+        if invalid:
+            raise ValueError(f"unsupported metric directions: {invalid}")
+
+    def _normalized_delta(self, key: str, candidate: float, baseline: float) -> float:
+        raw_delta = candidate - baseline
+        if self.metric_directions.get(key, "maximize") == "minimize":
+            return -raw_delta
+        return raw_delta
 
     def decide(
         self,
@@ -62,16 +81,21 @@ class PromotionGate:
             if baseline is None:
                 improvements[key] = candidate_metrics[key]
                 continue
-            delta = candidate_metrics[key] - baseline
+            delta = self._normalized_delta(key, candidate_metrics[key], baseline)
             improvements[key] = delta
             allowed_regression = self.metric_regression_limits.get(key, self.max_regression)
             if delta < -allowed_regression:
+                direction = self.metric_directions.get(key, "maximize")
                 reasons.append(
-                    f"regression {key}: {delta:+.6f} exceeds {-allowed_regression:+.6f}"
+                    f"regression {key} ({direction}): {delta:+.6f} exceeds "
+                    f"{-allowed_regression:+.6f}"
                 )
 
         if stable_metrics:
-            best_delta = max((improvements.get(key, float("-inf")) for key in self.required_metrics), default=float("-inf"))
+            best_delta = max(
+                (improvements.get(key, float("-inf")) for key in self.required_metrics),
+                default=float("-inf"),
+            )
             if best_delta < self.min_improvement:
                 reasons.append(
                     f"no required metric improves by at least {self.min_improvement:+.6f}"

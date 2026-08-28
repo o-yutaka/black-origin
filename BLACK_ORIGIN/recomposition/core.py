@@ -6,6 +6,7 @@ from typing import Any, Dict, Iterable, Mapping, Sequence
 
 from BLACK_ORIGIN.recomposition.archive import CandidateArchive
 from BLACK_ORIGIN.recomposition.decomposer import StructuralDecomposer
+from BLACK_ORIGIN.recomposition.evaluation import EvaluatorAdapter, ParallelEvaluatorSuite
 from BLACK_ORIGIN.recomposition.fusion import CrossBranchFusion
 from BLACK_ORIGIN.recomposition.materializer import ReconstructionMaterializer
 from BLACK_ORIGIN.recomposition.models import Candidate, Evaluation, PromotionDecision, ReconstructionPlan
@@ -53,6 +54,20 @@ class RecompositionCore:
         )
         return self.archive.add_candidate(candidate, components)
 
+    def candidate_value(self, candidate_id: str) -> Any:
+        if self.archive.get_candidate(candidate_id) is None:
+            raise KeyError(candidate_id)
+        roots = [
+            component.value
+            for component in self.archive.components_for(candidate_id)
+            if component.path == "$"
+        ]
+        if len(roots) != 1:
+            raise RuntimeError(
+                f"candidate {candidate_id} must have exactly one root component, got {len(roots)}"
+            )
+        return roots[0]
+
     def evaluate(
         self,
         candidate_id: str,
@@ -71,6 +86,29 @@ class RecompositionCore:
         )
         self.archive.add_evaluation(evaluation)
         return evaluation
+
+    def evaluate_parallel(
+        self,
+        candidate_id: str,
+        evaluators: Sequence[EvaluatorAdapter],
+        *,
+        max_workers: int | None = None,
+    ) -> list[Evaluation]:
+        """Evaluate one candidate concurrently, recording results only on full success."""
+        value = self.candidate_value(candidate_id)
+        outcomes = ParallelEvaluatorSuite(max_workers=max_workers).run(value, evaluators)
+        evaluations = [
+            Evaluation(
+                candidate_id=candidate_id,
+                metrics=outcome.metrics,
+                evaluator=outcome.evaluator,
+                notes="parallel evaluator suite",
+            )
+            for outcome in outcomes
+        ]
+        for evaluation in evaluations:
+            self.archive.add_evaluation(evaluation)
+        return evaluations
 
     def rank_parents(
         self,
@@ -139,6 +177,7 @@ class RecompositionCore:
         min_improvement: float = 0.0,
         max_regression: float = 0.0,
         metric_regression_limits: Mapping[str, float] | None = None,
+        metric_directions: Mapping[str, str] | None = None,
     ) -> PromotionDecision:
         candidate = self.archive.get_candidate(candidate_id)
         if candidate is None:
@@ -149,6 +188,7 @@ class RecompositionCore:
             min_improvement=min_improvement,
             max_regression=max_regression,
             metric_regression_limits=metric_regression_limits,
+            metric_directions=metric_directions,
         )
         stable_evaluations: Iterable[Evaluation] = ()
         if stable is not None and stable.candidate_id != candidate_id:
@@ -166,6 +206,7 @@ class RecompositionCore:
         min_improvement: float = 0.0,
         max_regression: float = 0.0,
         metric_regression_limits: Mapping[str, float] | None = None,
+        metric_directions: Mapping[str, str] | None = None,
     ) -> PromotionDecision:
         decision = self.promotion_decision(
             candidate_id,
@@ -173,6 +214,7 @@ class RecompositionCore:
             min_improvement=min_improvement,
             max_regression=max_regression,
             metric_regression_limits=metric_regression_limits,
+            metric_directions=metric_directions,
         )
         if not decision.allowed:
             self.archive.set_status(candidate_id, "rejected")
