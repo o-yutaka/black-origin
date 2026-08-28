@@ -3,7 +3,7 @@ name: Recomposition Core
 on:
   push:
     branches:
-      - feat/recomposition-core
+      - 'feat/recomposition-core'
   pull_request:
     paths:
       - 'BLACK_ORIGIN/recomposition/**'
@@ -28,8 +28,10 @@ jobs:
       - name: Run BLACK smoke cycle
         env:
           BLACK_ORIGIN_STATE_DIR: /tmp/black-origin-state
-        run: python - <<'PY'
+        run: |
+          python - <<'PY'
           from BLACK_ORIGIN.kernel.system import BlackOriginSystem
+
           system = BlackOriginSystem()
           result = system.run_cycle({'planet': 'earth', 'mode': 'ci'})
           assert result['status'] == 'ok', result
