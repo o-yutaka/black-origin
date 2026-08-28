@@ -7,6 +7,7 @@ from BLACK_ORIGIN.recomposition.evaluation import (
 )
 from BLACK_ORIGIN.recomposition.materializer import ReconstructionMaterializer
 from BLACK_ORIGIN.recomposition.module import RecompositionModule
+from BLACK_ORIGIN.recomposition.rollback import RollbackManager, RollbackRecord
 
 __all__ = [
     "EvaluatorAdapter",
@@ -16,4 +17,6 @@ __all__ = [
     "RecompositionCore",
     "ReconstructionMaterializer",
     "RecompositionModule",
+    "RollbackManager",
+    "RollbackRecord",
 ]
