@@ -7,6 +7,7 @@ from typing import Any, Dict, Iterable, Mapping, Sequence
 from BLACK_ORIGIN.recomposition.archive import CandidateArchive
 from BLACK_ORIGIN.recomposition.decomposer import StructuralDecomposer
 from BLACK_ORIGIN.recomposition.fusion import CrossBranchFusion
+from BLACK_ORIGIN.recomposition.materializer import ReconstructionMaterializer
 from BLACK_ORIGIN.recomposition.models import Candidate, Evaluation, PromotionDecision, ReconstructionPlan
 from BLACK_ORIGIN.recomposition.promotion_gate import PromotionGate
 from BLACK_ORIGIN.recomposition.selector import DiversityAwareSelector, SelectionScore
@@ -28,6 +29,7 @@ class RecompositionCore:
         self.decomposer = decomposer or StructuralDecomposer()
         self.selector = DiversityAwareSelector()
         self.fusion = CrossBranchFusion()
+        self.materializer = ReconstructionMaterializer()
 
     def register(
         self,
@@ -99,6 +101,35 @@ class RecompositionCore:
             raise KeyError("missing parent candidates: " + ", ".join(missing))
         plan = self.fusion.build_plan(parent_ids, components, component_scores)
         return self.archive.add_plan(plan)
+
+    def materialize_plan(self, plan_id: str) -> Candidate:
+        """Build a reconstructed value and archive it as a candidate.
+
+        A new materialized value is always registered as experimental. If the
+        content is byte-for-byte equivalent to an already archived candidate,
+        content-addressed deduplication returns that existing candidate instead;
+        no status is mutated and no promotion is performed here.
+        """
+        plan = self.archive.get_plan(plan_id)
+        if plan is None:
+            raise KeyError(plan_id)
+        components = {
+            parent_id: self.archive.components_for(parent_id)
+            for parent_id in plan.parent_ids
+        }
+        missing = [parent_id for parent_id, rows in components.items() if not rows]
+        if missing:
+            raise KeyError("missing parent candidates: " + ", ".join(missing))
+        value = self.materializer.materialize(plan, components)
+        return self.register(
+            value,
+            parent_ids=tuple(plan.parent_ids),
+            metadata={
+                "reconstruction_plan": plan.plan_id,
+                "reconstruction_strategy": plan.strategy,
+                "materialized": True,
+            },
+        )
 
     def promotion_decision(
         self,
