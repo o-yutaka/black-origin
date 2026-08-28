@@ -97,7 +97,8 @@ class RecompositionCore:
         missing = [parent_id for parent_id, rows in components.items() if not rows]
         if missing:
             raise KeyError("missing parent candidates: " + ", ".join(missing))
-        return self.fusion.build_plan(parent_ids, components, component_scores)
+        plan = self.fusion.build_plan(parent_ids, components, component_scores)
+        return self.archive.add_plan(plan)
 
     def promotion_decision(
         self,
