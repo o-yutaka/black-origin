@@ -1,0 +1,38 @@
+name: Recomposition Core
+
+on:
+  push:
+    branches:
+      - feat/recomposition-core
+  pull_request:
+    paths:
+      - 'BLACK_ORIGIN/recomposition/**'
+      - 'BLACK_ORIGIN/kernel/system.py'
+      - 'tests/test_recomposition_core.py'
+      - '.github/workflows/recomposition-core.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Run BLACK smoke cycle
+        env:
+          BLACK_ORIGIN_STATE_DIR: /tmp/black-origin-state
+        run: python - <<'PY'
+          from BLACK_ORIGIN.kernel.system import BlackOriginSystem
+          system = BlackOriginSystem()
+          result = system.run_cycle({'planet': 'earth', 'mode': 'ci'})
+          assert result['status'] == 'ok', result
+          assert system.event_bus.history('recomposition.candidate_registered')
+          print(result)
+          PY
