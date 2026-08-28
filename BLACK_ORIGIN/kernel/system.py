@@ -23,6 +23,7 @@ from BLACK_ORIGIN.research_civilization.module import ResearchCivilizationModule
 from BLACK_ORIGIN.agents.module import AgentsModule
 from BLACK_ORIGIN.orchestrator.module import OrchestratorModule
 from BLACK_ORIGIN.meta_intelligence.module import MetaIntelligenceModule
+from BLACK_ORIGIN.recomposition.module import RecompositionModule
 from BLACK_ORIGIN.evolution.module import EvolutionModule
 from BLACK_ORIGIN.recursive_intelligence.module import RecursiveIntelligenceModule
 from BLACK_ORIGIN.black_engine.module import BlackEngineModule
@@ -45,8 +46,8 @@ class BlackOriginSystem:
             KnowledgeFabricModule(), KnowledgeGraphModule(), WorldModelModule(), PlanetaryDigitalTwinModule(),
             SimulationModule(), DiscoveryEngineModule(), ReasoningModule(), StrategyModule(),
             ResearchCivilizationModule(), AgentsModule(), OrchestratorModule(), MetaIntelligenceModule(),
-            EvolutionModule(), RecursiveIntelligenceModule(), BlackEngineModule(), ComputerControlModule(),
-            DistributedNetworkModule(), SyntheticUniverseModule(), CivilizationModule(),
+            RecompositionModule(), EvolutionModule(), RecursiveIntelligenceModule(), BlackEngineModule(),
+            ComputerControlModule(), DistributedNetworkModule(), SyntheticUniverseModule(), CivilizationModule(),
         ]
 
     def run_cycle(self, state: Dict[str, str]) -> Dict[str, str]:
