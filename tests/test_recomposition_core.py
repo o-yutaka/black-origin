@@ -47,7 +47,24 @@ class RecompositionCoreTests(unittest.TestCase):
             self.assertEqual(first.candidate_id, second.candidate_id)
             self.assertEqual(core.archive.stats()["candidates"], 1)
 
-    def test_cross_branch_fusion_builds_plan_without_promotion(self) -> None:
+    def test_convergent_candidate_preserves_multiple_parent_lineage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            core = self.make_core(tmp)
+            parent_a = core.register({"parent": "A"})
+            parent_b = core.register({"parent": "B"})
+            first = core.register({"shared": "result"}, parent_ids=[parent_a.candidate_id])
+            second = core.register({"shared": "result"}, parent_ids=[parent_b.candidate_id])
+
+            self.assertEqual(first.candidate_id, second.candidate_id)
+            restored = core.archive.get_candidate(first.candidate_id)
+            self.assertEqual(
+                set(restored.parent_ids),
+                {parent_a.candidate_id, parent_b.candidate_id},
+            )
+            self.assertEqual(core.archive.children_count(parent_a.candidate_id), 1)
+            self.assertEqual(core.archive.children_count(parent_b.candidate_id), 1)
+
+    def test_cross_branch_fusion_builds_and_persists_plan_without_promotion(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             core = self.make_core(tmp)
             left = core.register({"planner": {"depth": 2}, "memory": "A"})
@@ -56,6 +73,10 @@ class RecompositionCoreTests(unittest.TestCase):
 
             self.assertEqual(tuple(plan.parent_ids), (left.candidate_id, right.candidate_id))
             self.assertTrue(plan.selected_components)
+            restored = core.archive.get_plan(plan.plan_id)
+            self.assertIsNotNone(restored)
+            self.assertEqual(tuple(restored.selected_components), tuple(plan.selected_components))
+            self.assertEqual(core.archive.stats()["reconstruction_plans"], 1)
             self.assertIsNone(core.archive.stable_candidate())
 
     def test_promotion_gate_rejects_regression_and_preserves_stable(self) -> None:
