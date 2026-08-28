@@ -4,9 +4,14 @@ import json
 import os
 from pathlib import Path
 import sqlite3
-from typing import Any, Dict, Iterable, List, Mapping
+from typing import Any, Dict, Iterable, List
 
-from BLACK_ORIGIN.recomposition.models import AtomicComponent, Candidate, Evaluation
+from BLACK_ORIGIN.recomposition.models import (
+    AtomicComponent,
+    Candidate,
+    Evaluation,
+    ReconstructionPlan,
+)
 
 
 def _default_path() -> str:
@@ -68,6 +73,14 @@ class CandidateArchive:
                     created_at REAL NOT NULL,
                     FOREIGN KEY(candidate_id) REFERENCES candidates(candidate_id) ON DELETE CASCADE
                 );
+                CREATE TABLE IF NOT EXISTS reconstruction_plans (
+                    plan_id TEXT PRIMARY KEY,
+                    parent_ids_json TEXT NOT NULL,
+                    selected_components_json TEXT NOT NULL,
+                    strategy TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    created_at REAL NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS promotions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     candidate_id TEXT NOT NULL,
@@ -92,7 +105,24 @@ class CandidateArchive:
                 (candidate.content_hash,),
             ).fetchone()
             if existing is not None:
-                return self._candidate_from_row(existing)
+                existing_parents = list(json.loads(existing["parent_ids_json"]))
+                merged_parents = list(dict.fromkeys(existing_parents + list(candidate.parent_ids)))
+                if merged_parents != existing_parents:
+                    connection.execute(
+                        "UPDATE candidates SET parent_ids_json = ? WHERE candidate_id = ?",
+                        (self._json(merged_parents), existing["candidate_id"]),
+                    )
+                for parent_id in candidate.parent_ids:
+                    if parent_id != existing["candidate_id"]:
+                        connection.execute(
+                            "INSERT OR IGNORE INTO lineage(parent_id, child_id) VALUES (?, ?)",
+                            (parent_id, existing["candidate_id"]),
+                        )
+                refreshed = connection.execute(
+                    "SELECT * FROM candidates WHERE candidate_id = ?",
+                    (existing["candidate_id"],),
+                ).fetchone()
+                return self._candidate_from_row(refreshed)
 
             connection.execute(
                 """
@@ -126,10 +156,11 @@ class CandidateArchive:
                     ),
                 )
             for parent_id in candidate.parent_ids:
-                connection.execute(
-                    "INSERT OR IGNORE INTO lineage(parent_id, child_id) VALUES (?, ?)",
-                    (parent_id, candidate.candidate_id),
-                )
+                if parent_id != candidate.candidate_id:
+                    connection.execute(
+                        "INSERT OR IGNORE INTO lineage(parent_id, child_id) VALUES (?, ?)",
+                        (parent_id, candidate.candidate_id),
+                    )
         return candidate
 
     def add_evaluation(self, evaluation: Evaluation) -> None:
@@ -147,6 +178,41 @@ class CandidateArchive:
                     evaluation.created_at,
                 ),
             )
+
+    def add_plan(self, plan: ReconstructionPlan) -> ReconstructionPlan:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO reconstruction_plans(
+                    plan_id, parent_ids_json, selected_components_json, strategy, metadata_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    plan.plan_id,
+                    self._json(list(plan.parent_ids)),
+                    self._json(list(plan.selected_components)),
+                    plan.strategy,
+                    self._json(dict(plan.metadata)),
+                    plan.created_at,
+                ),
+            )
+        return plan
+
+    def get_plan(self, plan_id: str) -> ReconstructionPlan | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM reconstruction_plans WHERE plan_id = ?", (plan_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return ReconstructionPlan(
+            plan_id=row["plan_id"],
+            parent_ids=tuple(json.loads(row["parent_ids_json"])),
+            selected_components=tuple(json.loads(row["selected_components_json"])),
+            strategy=row["strategy"],
+            metadata=json.loads(row["metadata_json"]),
+            created_at=float(row["created_at"]),
+        )
 
     def get_candidate(self, candidate_id: str) -> Candidate | None:
         with self._connect() as connection:
@@ -254,10 +320,12 @@ class CandidateArchive:
             candidate_count = int(connection.execute("SELECT COUNT(*) FROM candidates").fetchone()[0])
             evaluation_count = int(connection.execute("SELECT COUNT(*) FROM evaluations").fetchone()[0])
             lineage_count = int(connection.execute("SELECT COUNT(*) FROM lineage").fetchone()[0])
+            plan_count = int(connection.execute("SELECT COUNT(*) FROM reconstruction_plans").fetchone()[0])
         return {
             "candidates": candidate_count,
             "evaluations": evaluation_count,
             "lineage_edges": lineage_count,
+            "reconstruction_plans": plan_count,
         }
 
     @staticmethod
